@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
+include (${VG_CONFIGURATION})
 project(json11 VERSION 1.0.0 LANGUAGES CXX)
 
 enable_testing()
@@ -19,6 +20,6 @@ if (JSON11_BUILD_TESTS)
   target_link_libraries(json11_test json11)
 endif()
 
-install(TARGETS json11 DESTINATION lib)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/json11.hpp" DESTINATION include)
+install(TARGETS json11 DESTINATION ${DESTDIR}/lib)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/json11.hpp" DESTINATION ${DESTDIR}/include)
 install(FILES "${CMAKE_BINARY_DIR}/json11.pc" DESTINATION lib/pkgconfig)
