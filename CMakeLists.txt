@@ -20,6 +20,7 @@ if (JSON11_BUILD_TESTS)
   target_link_libraries(json11_test json11)
 endif()
 
-install(TARGETS json11 DESTINATION ${DESTDIR}/lib)
+install(TARGETS json11 DESTINATION ${DESTDIR}/lib EXPORT json11-targets)
+install (EXPORT json11-targets DESTINATION ${CMAKE_MODULE_PREFIX})
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/json11.hpp" DESTINATION ${DESTDIR}/include)
 install(FILES "${CMAKE_BINARY_DIR}/json11.pc" DESTINATION lib/pkgconfig)
