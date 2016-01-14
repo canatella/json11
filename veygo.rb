@@ -17,3 +17,7 @@ end
 task :clean do
   cmake.clean
 end
+
+task :rtags do
+  cmake.rtags
+end
