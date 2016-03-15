@@ -1,0 +1,2 @@
+config ENABLE_VENDOR_JSON11
+       bool "Enable JSON11 package"
