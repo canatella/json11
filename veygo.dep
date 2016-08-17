@@ -1,1 +1,2 @@
-builder
+vendor/cmake-android
+vendor/cmake-ios
