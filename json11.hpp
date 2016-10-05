@@ -55,6 +55,9 @@
 #include <map>
 #include <memory>
 #include <initializer_list>
+#include <ctime>
+#include <chrono>
+#include <experimental/optional>
 
 #ifdef _MSC_VER
     #if _MSC_VER <= 1800 // VS 2013
@@ -138,15 +141,24 @@ public:
     // can both be applied to a NUMBER-typed object.
     double number_value() const;
     int int_value() const;
+    std::experimental::optional<int> maybe_int_value() const;
 
     // Return the enclosed value if this is a boolean, false otherwise.
     bool bool_value() const;
     // Return the enclosed string if this is a string, "" otherwise.
     const std::string &string_value() const;
+    std::experimental::optional<std::string> maybe_string_value() const;
+
     // Return the enclosed std::vector if this is an array, or an empty vector otherwise.
     const array &array_items() const;
+    std::vector<std::string> array_strings() const;
+    std::experimental::optional<array> maybe_array_items() const;
+
     // Return the enclosed std::map if this is an object, or an empty map otherwise.
     const object &object_items() const;
+
+    // Convert iso date to time point
+    std::chrono::system_clock::time_point time_value() const;
 
     // Return a reference to arr[i] if this is an array, Json() otherwise.
     const Json & operator[](size_t i) const;

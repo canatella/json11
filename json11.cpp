@@ -268,6 +268,53 @@ const map<string, Json> & Json::object_items()    const { return m_ptr->object_i
 const Json & Json::operator[] (size_t i)          const { return (*m_ptr)[i];           }
 const Json & Json::operator[] (const string &key) const { return (*m_ptr)[key];         }
 
+std::experimental::optional<int>
+Json::maybe_int_value() const
+{
+    std::experimental::optional<int> value;
+    if (!this->is_null())
+        value = this->int_value();
+    return value;
+}
+
+std::experimental::optional<string>
+Json::maybe_string_value() const
+{
+    std::experimental::optional<string> value;
+    if (!this->is_null())
+        value = this->string_value();
+    return value;
+}
+
+std::experimental::optional<std::vector<Json>>
+Json::maybe_array_items() const
+{
+    std::experimental::optional<std::vector<Json>> value;
+    if (!this->is_null())
+        value = this->array_items();
+    return value;
+}
+
+std::vector<std::string>
+Json::array_strings() const
+{
+    std::vector<std::string> value;
+    if (!this->is_null()) {
+        for (const auto &v : this->array_items()) {
+            value.push_back(v.string_value());
+        }
+    }
+    return value;
+}
+
+std::chrono::system_clock::time_point
+Json::time_value() const
+{
+    struct tm tm;
+    strptime(this->string_value().c_str(), "%FT%T%Z", &tm);
+    return std::chrono::system_clock::from_time_t(std::mktime(&tm));
+}
+
 double                    JsonValue::number_value()              const { return 0; }
 int                       JsonValue::int_value()                 const { return 0; }
 bool                      JsonValue::bool_value()                const { return false; }
