@@ -9,6 +9,12 @@ project(json11 VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+install (FILES  Findjson11.cmake DESTINATION ${CMAKE_MODULE_PREFIX})
+
+if (VG_PLATFORM_ALL)
+  return ()
+endif ()
+
 add_library(json11 STATIC json11.cpp)
 #target_include_directories(json11 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 #target_compile_options(json11
@@ -25,5 +31,4 @@ endif()
 install(TARGETS json11 DESTINATION lib EXPORT json11-targets)
 install (EXPORT json11-targets DESTINATION ${CMAKE_MODULE_PREFIX})
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/json11.hpp" DESTINATION include)
-install (FILES  Findjson11.cmake DESTINATION ${CMAKE_MODULE_PREFIX})
 install(FILES "${CMAKE_BINARY_DIR}/json11.pc" DESTINATION lib/pkgconfig)
