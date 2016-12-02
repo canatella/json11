@@ -75,6 +75,7 @@ enum JsonParse {
 };
 
 class JsonValue;
+class JsonHandler;
 
 class Json final {
 public:
@@ -188,6 +189,24 @@ public:
         std::string::size_type parser_stop_pos;
         return parse_multi(in, parser_stop_pos, err, strategy);
     }
+    // Parse. If parse fails, return Json() and assign an error message to err.
+    static void parse_event(const std::string & in,
+                            std::string::size_type & parser_stop_pos,
+                            std::string & err,
+                            std::shared_ptr<JsonHandler> handler,
+                            JsonParse strategy = JsonParse::STANDARD);
+    static void parse_event(const char * in,
+                            std::string::size_type & parser_stop_pos,
+                            std::string & err,
+                            std::shared_ptr<JsonHandler> handler,
+                            JsonParse strategy = JsonParse::STANDARD) {
+        if (in) {
+            parse_event(std::string(in), parser_stop_pos, err, handler, strategy);
+        } else {
+            err = "null input";
+            return;
+        }
+    }
 
     bool operator== (const Json &rhs) const;
     bool operator<  (const Json &rhs) const;
@@ -227,6 +246,22 @@ protected:
     virtual const Json::object &object_items() const;
     virtual const Json &operator[](const std::string &key) const;
     virtual ~JsonValue() {}
+};
+
+/* event parsing
+ *
+ * Callbacks called when parsing the json
+ */
+class JsonHandler {
+public:
+    virtual ~JsonHandler() {};
+    virtual void json_object_begin() = 0;
+    virtual void json_object_end() = 0;
+    virtual void json_object_key(const std::string &key) = 0;
+    virtual void json_object_value(const std::string &key, const Json &value) = 0;
+    virtual void json_array_begin() = 0;
+    virtual void json_array_end() = 0;
+    virtual void json_array_value(const Json &value) = 0;
 };
 
 } // namespace json11

@@ -340,6 +340,7 @@ struct JsonParser final {
     string &err;
     bool failed;
     const JsonParse strategy;
+    std::shared_ptr<JsonHandler> handler;
 
     /* fail(msg, err_ret = Json())
      *
@@ -660,10 +661,16 @@ struct JsonParser final {
             return parse_string();
 
         if (ch == '{') {
+            if (handler)
+                handler->json_object_begin();
+
             map<string, Json> data;
             ch = get_next_token();
-            if (ch == '}')
+            if (ch == '}') {
+                if (handler)
+                    handler->json_object_end();
                 return data;
+            }
 
             while (1) {
                 if (ch != '"')
@@ -677,13 +684,25 @@ struct JsonParser final {
                 if (ch != ':')
                     return fail("expected ':' in object, got " + esc(ch));
 
-                data[std::move(key)] = parse_json(depth + 1);
+                if (handler)
+                    handler->json_object_key(key);
+
+                Json value = parse_json(depth + 1);
+
+                if (handler)
+                    handler->json_object_value(key, value);
+
+                data[std::move(key)] = value;
                 if (failed)
                     return Json();
 
                 ch = get_next_token();
-                if (ch == '}')
+                if (ch == '}') {
+                    if (handler)
+                        handler->json_object_end();
                     break;
+                }
+
                 if (ch != ',')
                     return fail("expected ',' in object, got " + esc(ch));
 
@@ -693,20 +712,31 @@ struct JsonParser final {
         }
 
         if (ch == '[') {
+            if (handler)
+                handler->json_array_begin();
             vector<Json> data;
             ch = get_next_token();
-            if (ch == ']')
+            if (ch == ']') {
+                if (handler)
+                    handler->json_array_end();
                 return data;
+            }
 
             while (1) {
                 i--;
-                data.push_back(parse_json(depth + 1));
+                Json value = parse_json(depth + 1);
+                if (handler)
+                    handler->json_array_value(value);
+                data.push_back(value);
                 if (failed)
                     return Json();
 
                 ch = get_next_token();
-                if (ch == ']')
+                if (ch == ']') {
+                    if (handler)
+                        handler->json_array_end();
                     break;
+                }
                 if (ch != ',')
                     return fail("expected ',' in list, got " + esc(ch));
 
@@ -750,6 +780,23 @@ vector<Json> Json::parse_multi(const string &in,
     }
     return json_vec;
 }
+
+void Json::parse_event(const string &in,
+                       std::string::size_type &parser_stop_pos,
+                       string &err,
+                       std::shared_ptr<JsonHandler> handler,
+                       JsonParse strategy) {
+    JsonParser parser { in, 0, err, false, strategy };
+    parser.handler = handler;
+    while (parser.i != in.size() && !parser.failed) {
+        parser.parse_json(0);
+        // Check for another object
+        parser.consume_garbage();
+        if (!parser.failed)
+            parser_stop_pos = parser.i;
+    }
+}
+
 
 /* * * * * * * * * * * * * * * * * * * *
  * Shape-checking
