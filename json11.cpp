@@ -326,20 +326,23 @@ static inline bool in_range(long x, long lower, long upper) {
     return (x >= lower && x <= upper);
 }
 
-namespace {
-/* JsonParser
+/* JsonParserPriv
  *
  * Object that tracks all state of an in-progress parse.
  */
-struct JsonParser final {
+struct JsonParserPriv final {
 
     /* State
      */
-    const string &str;
-    size_t i;
+    string str;
+    size_t i = 0;
     string &err;
-    bool failed;
+    bool failed = false;
     const JsonParse strategy;
+
+    JsonParserPriv(string str, string &err, const JsonParse strategy):
+        str(str), err(err), strategy(strategy) {
+    }
 
     /* fail(msg, err_ret = Json())
      *
@@ -719,10 +722,28 @@ struct JsonParser final {
         return fail("expected value, got " + esc(ch));
     }
 };
-}//namespace {
+
+JsonParser::JsonParser():
+    parser(new JsonParserPriv("", error, JsonParse::STANDARD)) {
+}
+
+JsonParser::JsonParser(JsonParse strategy):
+    parser(new JsonParserPriv("", error, strategy)) {
+}
+
+JsonParser::~JsonParser() {
+}
+
+void JsonParser::consume(const std::string &in) {
+    parser->str = in;
+}
+
+Json JsonParser::json() {
+    return parser->parse_json(0);
+}
 
 Json Json::parse(const string &in, string &err, JsonParse strategy) {
-    JsonParser parser { in, 0, err, false, strategy };
+    JsonParserPriv parser { in, err, strategy };
     Json result = parser.parse_json(0);
 
     // Check for any trailing garbage
@@ -738,7 +759,7 @@ vector<Json> Json::parse_multi(const string &in,
                                std::string::size_type &parser_stop_pos,
                                string &err,
                                JsonParse strategy) {
-    JsonParser parser { in, 0, err, false, strategy };
+    JsonParserPriv parser { in, err, strategy };
     parser_stop_pos = 0;
     vector<Json> json_vec;
     while (parser.i != in.size() && !parser.failed) {
