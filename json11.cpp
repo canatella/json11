@@ -338,6 +338,8 @@ struct JsonParserPriv final {
     size_t i = 0;
     string &err;
     bool failed = false;
+    bool need_data = false;
+    bool eof = false;
     const JsonParse strategy;
 
     JsonParserPriv(string str, string &err, const JsonParse strategy):
@@ -360,6 +362,32 @@ struct JsonParserPriv final {
         return err_ret;
     }
 
+    /* stop(msg, err_ret = Json())
+     *
+     * Mark this parse as needing more data.
+     */
+    Json stop(string &&msg) {
+        return stop(move(msg), Json());
+    }
+
+    template <typename T>
+    T stop(string &&msg, const T err_ret) {
+        if (!failed && !need_data)
+            err = std::move(msg);
+        if (eof)
+            failed = true;
+        need_data = true;
+        return err_ret;
+    }
+
+    /* eos()
+     *
+     * Return true if we are at the end of the parsing string
+     */
+    bool eos() {
+        return i == str.size();
+    }
+
     /* consume_whitespace()
      *
      * Advance until the current character is non-whitespace.
@@ -377,34 +405,38 @@ struct JsonParserPriv final {
       bool comment_found = false;
       if (str[i] == '/') {
         i++;
-        if (i == str.size())
-          return fail("unexpected end of input inside comment", false);
+        if (eos())
+            return stop("unexpected end of input inside comment", false);
         if (str[i] == '/') { // inline comment
           i++;
-          if (i == str.size())
-            return fail("unexpected end of input inside inline comment", false);
+          if (eos())
+            return stop("unexpected end of input inside inline comment", false);
           // advance until next line
           while (str[i] != '\n') {
             i++;
-            if (i == str.size())
-              return fail("unexpected end of input inside inline comment", false);
+            if (eos()) {
+              if (eof)
+                break;
+              else
+                return stop("unexpected end of input inside inline comment", false);
+            }
           }
           comment_found = true;
         }
         else if (str[i] == '*') { // multiline comment
           i++;
           if (i > str.size()-2)
-            return fail("unexpected end of input inside multi-line comment", false);
+            return stop("unexpected end of input inside multi-line comment", false);
           // advance until closing tokens
           while (!(str[i] == '*' && str[i+1] == '/')) {
             i++;
             if (i > str.size()-2)
-              return fail(
+              return stop(
                 "unexpected end of input inside multi-line comment", false);
           }
           i += 2;
-          if (i == str.size())
-            return fail(
+          if (eos())
+            return stop(
               "unexpected end of input inside multi-line comment", false);
           comment_found = true;
         }
@@ -437,8 +469,11 @@ struct JsonParserPriv final {
      */
     char get_next_token() {
         consume_garbage();
-        if (i == str.size())
-            return fail("unexpected end of input", (char)0);
+        if (need_data) {
+            return '\0';
+        } else if (eos()) {
+            return stop("unexpected end of input", '\0');
+        }
 
         return str[i++];
     }
@@ -476,8 +511,8 @@ struct JsonParserPriv final {
         string out;
         long last_escaped_codepoint = -1;
         while (true) {
-            if (i == str.size())
-                return fail("unexpected end of input in string", "");
+            if (eos())
+                return stop("unexpected end of input in string", "");
 
             char ch = str[i++];
 
@@ -498,8 +533,8 @@ struct JsonParserPriv final {
             }
 
             // Handle escapes
-            if (i == str.size())
-                return fail("unexpected end of input in string", "");
+            if (eos())
+                return stop("unexpected end of input in string", "");
 
             ch = str[i++];
 
@@ -574,12 +609,24 @@ struct JsonParserPriv final {
         // Integer part
         if (str[i] == '0') {
             i++;
+            if (eos())
+                return stop("end of input while parsing number");
             if (in_range(str[i], '0', '9'))
                 return fail("leading 0s not permitted in numbers");
         } else if (in_range(str[i], '1', '9')) {
             i++;
-            while (in_range(str[i], '0', '9'))
+            if (eos())
+                return stop("end of input while parsing number");
+            while (in_range(str[i], '0', '9')) {
                 i++;
+                if (eos()) {
+                    if (eof)
+                        break;
+                    else
+                        return stop("end of input while parsing number");
+                }
+            }
+
         } else {
             return fail("invalid " + esc(str[i]) + " in number");
         }
@@ -592,25 +639,47 @@ struct JsonParserPriv final {
         // Decimal part
         if (str[i] == '.') {
             i++;
+            if (eos())
+                return stop("end of input while parsing number");
+
             if (!in_range(str[i], '0', '9'))
                 return fail("at least one digit required in fractional part");
 
-            while (in_range(str[i], '0', '9'))
+            while (in_range(str[i], '0', '9')) {
                 i++;
+                if (eos()) {
+                    if (eof)
+                        break;
+                    else
+                        return stop("end of input while parsing number");
+                }
+            }
         }
 
         // Exponent part
         if (str[i] == 'e' || str[i] == 'E') {
             i++;
+            if (eos())
+                return stop("end of input while parsing number");
 
-            if (str[i] == '+' || str[i] == '-')
+            if (str[i] == '+' || str[i] == '-') {
                 i++;
+                if (eos())
+                    return stop("end of input while parsing number");
+            }
 
             if (!in_range(str[i], '0', '9'))
                 return fail("at least one digit required in exponent");
 
-            while (in_range(str[i], '0', '9'))
+            while (in_range(str[i], '0', '9')) {
                 i++;
+                if (eos()) {
+                    if (eof)
+                        break;
+                    else
+                        return stop("end of input while parsing number");
+                }
+            }
         }
 
         return std::strtod(str.c_str() + start_pos, nullptr);
@@ -624,6 +693,10 @@ struct JsonParserPriv final {
     Json expect(const string &expected, Json res) {
         assert(i != 0);
         i--;
+
+        if (str.length() - i < expected.length())
+            return stop("end of input, while parsing " + expected);
+
         if (str.compare(i, expected.length(), expected) == 0) {
             i += expected.length();
             return res;
@@ -642,7 +715,7 @@ struct JsonParserPriv final {
         }
 
         char ch = get_next_token();
-        if (failed)
+        if (need_data)
             return Json();
 
         if (ch == '-' || (ch >= '0' && ch <= '9')) {
@@ -669,22 +742,32 @@ struct JsonParserPriv final {
                 return data;
 
             while (1) {
+                if (need_data)
+                    return Json();
+
                 if (ch != '"')
                     return fail("expected '\"' in object, got " + esc(ch));
 
                 string key = parse_string();
                 if (failed)
+                if (failed || need_data)
                     return Json();
 
                 ch = get_next_token();
+                if (need_data)
+                    return Json();
+
                 if (ch != ':')
                     return fail("expected ':' in object, got " + esc(ch));
 
                 data[std::move(key)] = parse_json(depth + 1);
-                if (failed)
+                if (failed || need_data)
                     return Json();
 
                 ch = get_next_token();
+                if (need_data)
+                    return Json();
+
                 if (ch == '}')
                     break;
                 if (ch != ',')
@@ -702,12 +785,18 @@ struct JsonParserPriv final {
                 return data;
 
             while (1) {
+                if (need_data)
+                    return Json();
+
                 i--;
                 data.push_back(parse_json(depth + 1));
-                if (failed)
+                if (failed || need_data)
                     return Json();
 
                 ch = get_next_token();
+                if (need_data)
+                    return Json();
+
                 if (ch == ']')
                     break;
                 if (ch != ',')
@@ -739,17 +828,24 @@ void JsonParser::consume(const std::string &in) {
 }
 
 Json JsonParser::json() {
+    parser->eof = true;
     return parser->parse_json(0);
 }
 
 Json Json::parse(const string &in, string &err, JsonParse strategy) {
     JsonParserPriv parser { in, err, strategy };
+    parser.eof = true;
     Json result = parser.parse_json(0);
 
     // Check for any trailing garbage
     parser.consume_garbage();
     if (parser.i != in.size())
         return parser.fail("unexpected trailing " + esc(in[parser.i]));
+
+    if (parser.need_data) {
+        /* when doing full parsing, this is an error */
+        return Json();
+    }
 
     return result;
 }
@@ -760,13 +856,14 @@ vector<Json> Json::parse_multi(const string &in,
                                string &err,
                                JsonParse strategy) {
     JsonParserPriv parser { in, err, strategy };
+    parser.eof = true;
     parser_stop_pos = 0;
     vector<Json> json_vec;
-    while (parser.i != in.size() && !parser.failed) {
+    while (parser.i != in.size() && !parser.failed && !parser.need_data) {
         json_vec.push_back(parser.parse_json(0));
         // Check for another object
         parser.consume_garbage();
-        if (!parser.failed)
+        if (!parser.failed && !parser.need_data)
             parser_stop_pos = parser.i;
     }
     return json_vec;
