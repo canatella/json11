@@ -719,8 +719,8 @@ struct JsonParserPriv final {
      *
      * Parse a JSON object.
      */
-    void parse_json(int depth) {
-        if (depth > max_depth) {
+    void parse_json() {
+        if (values.size() > max_depth) {
             return fail("exceeded maximum nesting depth");
         }
 
@@ -775,7 +775,7 @@ struct JsonParserPriv final {
                 if (ch != ':')
                     return fail("expected ':' in object, got " + esc(ch));
 
-                parse_json(depth + 1);
+                parse_json();
                 if (need_data)
                     return;
 
@@ -815,7 +815,7 @@ struct JsonParserPriv final {
                     return;
 
                 i--;
-                parse_json(depth + 1);
+                parse_json();
                 if (need_data)
                     return;
 
@@ -862,7 +862,7 @@ JsonParser::~JsonParser() {
 void JsonParser::consume(const std::string &in) {
     parser->str = in;
     parser->eof = true;
-    parser->parse_json(0);
+    parser->parse_json();
 }
 
 Json JsonParser::json() {
@@ -872,7 +872,7 @@ Json JsonParser::json() {
 Json Json::parse(const string &in, string &err, JsonParse strategy) {
     JsonParserPriv parser { in, err, strategy };
     parser.eof = true;
-    parser.parse_json(0);
+    parser.parse_json();
 
     // Check for any trailing garbage
     parser.consume_garbage();
@@ -904,7 +904,7 @@ vector<Json> Json::parse_multi(const string &in,
     parser_stop_pos = 0;
     vector<Json> json_vec;
     while (parser.i != in.size() && !parser.failed && !parser.need_data) {
-        parser.parse_json(0);
+        parser.parse_json();
         if (parser.need_data) {
             parser.failed = true;
             parser.values.push(Json());
