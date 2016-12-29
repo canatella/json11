@@ -573,6 +573,27 @@ struct JsonParserPriv final {
         }
     }
 
+    /* parse_comment()
+     *
+     * Parse json comments.
+     */
+    void parse_comment() {
+        assert_state(VALUE_COMMENT);
+
+        bool comment_found = false;
+
+        consume_comment();
+        if (need_data)
+            return;
+
+        comment_found = values.top().bool_value();
+        values.pop();
+        consume_whitespace();
+
+        if (comment_found)
+            consume_garbage();
+    }
+
     /* parse_string()
      *
      * Parse a string, starting at the current position.
@@ -817,40 +838,71 @@ struct JsonParserPriv final {
     void parse_object() {
         assert(states.top() >= VALUE_OBJECT && states.top() <= OBJECT_VALUE);
 
-        values.push(map<string, Json>());
+        switch (states.top()) {
+        case VALUE_OBJECT:
+            values.push(map<string, Json>());
+            set_state(OBJECT_KEY_OR_END);
+            break;
 
-        set_state(OBJECT_KEY_OR_END);
-        char ch = get_next_token();
-        if (ch == '}') {
-            pop_state();
-            return;
-        }
+        case OBJECT_KEY_OR_END: {
+            char ch = get_next_token();
 
-        while (1) {
             if (need_data)
+                break;
+
+            if (ch == '}')
+                return pop_state();
+
+            if (ch != '"') {
+                values.pop();
+                fail("expected '\"' in object, got " + esc(ch));
                 return;
+            }
+
+            set_state(OBJECT_COLON);
+            push_state(VALUE_STRING);
+
+            break;
+        }
+        case OBJECT_COMMA_OR_END: {
+            char ch = get_next_token();
+
+            if (need_data)
+                break;
+
+            if (ch == '}') {
+                pop_state();
+                return;
+            }
+
+            if (ch != ',') {
+                values.pop();
+                fail("expected ',' or '}' in object, got " + esc(ch));
+                return;
+            }
+
+            set_state(OBJECT_KEY);
+
+            break;
+        }
+        case OBJECT_KEY: {
+            char ch = get_next_token();
+
+            if (need_data)
+                break;
 
             if (ch != '"') {
                 values.pop();
                 return fail("expected '\"' in object, got " + esc(ch));
             }
 
-            set_state(OBJECT_KEY);
-            push_state(VALUE_STRING);
-            parse_string();
-            if (need_data)
-                return;
-
-            string key = values.top().string_value();
-            values.pop();
-
-            if (failed) {
-                values.pop();
-                return values.push(Json());
-            }
-
             set_state(OBJECT_COLON);
-            ch = get_next_token();
+            push_state(VALUE_STRING);
+
+            break;
+        }
+        case OBJECT_COLON: {
+            char ch = get_next_token();
             if (need_data)
                 return;
 
@@ -861,37 +913,22 @@ struct JsonParserPriv final {
 
             set_state(OBJECT_VALUE);
             push_state(EXPECT_VALUE);
-            parse_json();
-            if (need_data)
-                return;
-
+            break;
+        }
+        case OBJECT_VALUE: {
             Json value = values.top();
             values.pop();
-
-            if (failed) {
-                values.pop();
-                return values.push(Json());
-            }
-
+            string key = values.top().string_value();
+            values.pop();
             map<string, Json> data = values.top().object_items();
             data[std::move(key)] = value;
             values.top() = data;
 
             set_state(OBJECT_COMMA_OR_END);
-            ch = get_next_token();
-            if (need_data)
-                return;
-
-            if (ch == '}') {
-                pop_state();
-                break;
-            }
-
-            if (ch != ',') {
-                values.pop();
-                return fail("expected ',' in object, got " + esc(ch));
-            }
-            ch = get_next_token();
+            break;
+        }
+        default:
+            assert(false);
         }
     }
 
@@ -902,58 +939,61 @@ struct JsonParserPriv final {
     void parse_array() {
         assert(states.top() >= VALUE_ARRAY && states.top() <= ARRAY_VALUE);
 
-        values.push(vector<Json>());
+        switch (states.top()) {
+        case VALUE_ARRAY:
+            values.push(vector<Json>());
+            set_state(ARRAY_VALUE_OR_END);
+            break;
 
-        set_state(ARRAY_VALUE_OR_END);
-        char ch = get_next_token();
+        case ARRAY_VALUE_OR_END: {
+            char ch = get_next_token();
 
-        if (ch == ']') {
-            pop_state();
-            return;
-        }
-
-        while (1) {
             if (need_data)
                 return;
+
+            if (ch == ']')
+                return pop_state();
 
             i--;
 
             set_state(ARRAY_VALUE);
             push_state(EXPECT_VALUE);
 
-            parse_json();
+            break;
+        }
+        case ARRAY_COMMA_OR_END: {
+            char ch = get_next_token();
             if (need_data)
                 return;
 
+            if (ch == ']') {
+                pop_state();
+                return;
+            }
+            if (ch != ',') {
+                values.pop();
+                fail("expected ',' in list, got " + esc(ch));
+                return;
+            }
+
+            set_state(ARRAY_VALUE_OR_END);
+
+            break;
+        }
+        case ARRAY_VALUE: {
             Json value = values.top();
             values.pop();
-
-            if (failed) {
-                values.pop();
-                return values.push(Json());
-            }
 
             vector<Json> data = values.top().array_items();
             data.push_back(value);
             values.top() = data;
 
             set_state(ARRAY_COMMA_OR_END);
-            ch = get_next_token();
-            if (need_data)
-                return;
 
-            if (ch == ']') {
-                pop_state();
-                break;
-            }
-
-            if (ch != ',') {
-                values.pop();
-                return fail("expected ',' in list, got " + esc(ch));
-            }
-
-            ch = get_next_token();
-            (void)ch;
+            break;
+        }
+        default:
+            assert(false);
         }
     }
 
@@ -974,42 +1014,79 @@ struct JsonParserPriv final {
 
         if (ch == '-' || (ch >= '0' && ch <= '9')) {
             i--;
-            set_state(VALUE_NUMBER);
-            return parse_number();
+            return set_state(VALUE_NUMBER);
         }
 
-        if (ch == 't') {
-            set_state(VALUE_TRUE);
-            return parse_true();
-        }
+        if (ch == 't')
+            return set_state(VALUE_TRUE);
 
-        if (ch == 'f') {
-            set_state(VALUE_FALSE);
-            return parse_false();
-        }
+        if (ch == 'f')
+            return set_state(VALUE_FALSE);
 
-        if (ch == 'n') {
-            set_state(VALUE_NULL);
-            return parse_null();
-        }
+        if (ch == 'n')
+            return set_state(VALUE_NULL);
 
-        if (ch == '"') {
-            set_state(VALUE_STRING);
-            return parse_string();
-        }
+        if (ch == '"')
+            return set_state(VALUE_STRING);
 
-        if (ch == '{') {
-            set_state(VALUE_OBJECT);
-            return parse_object();
-        }
+        if (ch == '{')
+            return set_state(VALUE_OBJECT);
 
-        if (ch == '[') {
-            set_state(VALUE_ARRAY);
-            return parse_array();
-        }
+        if (ch == '[')
+            return set_state(VALUE_ARRAY);
 
         return fail("expected value, got " + esc(ch));
     }
+
+    void consume(const std::string &in = std::string()) {
+        need_data = false;
+        str += in;
+
+        /* try to parse as much as possible */
+        while (!states.empty()) {
+            switch (states.top()) {
+            case EXPECT_VALUE:
+                parse_json();
+                break;
+            case VALUE_OBJECT:
+            case OBJECT_KEY_OR_END:
+            case OBJECT_COMMA_OR_END:
+            case OBJECT_KEY:
+            case OBJECT_COLON:
+            case OBJECT_VALUE:
+                parse_object();
+                break;
+            case VALUE_ARRAY:
+            case ARRAY_VALUE_OR_END:
+            case ARRAY_COMMA_OR_END:
+            case ARRAY_VALUE:
+                parse_array();
+                break;
+            case VALUE_STRING:
+                parse_string();
+                break;
+            case VALUE_NUMBER:
+                parse_number();
+                break;
+            case VALUE_TRUE:
+                parse_true();
+                break;
+            case VALUE_FALSE:
+                parse_false();
+                break;
+            case VALUE_NULL:
+                parse_null();
+                break;
+            case VALUE_COMMENT:
+                parse_comment();
+                break;
+            }
+
+            if (failed || need_data)
+                break;
+        }
+    }
+
 };
 
 JsonParser::JsonParser():
@@ -1024,33 +1101,28 @@ JsonParser::~JsonParser() {
 }
 
 void JsonParser::consume(const std::string &in) {
-    parser->str = in;
-    parser->eof = true;
-    parser->parse_json();
+    parser->consume(in);
 }
 
 Json JsonParser::json() {
+    parser->eof = true;
+    parser->consume();
+    if (!parser->failed && !parser->need_data)
+        error.clear();
     return parser->values.top();
 }
 
 Json Json::parse(const string &in, string &err, JsonParse strategy) {
     JsonParserPriv parser { in, err, strategy };
     assert(parser.states.size() == 1);
-
     parser.eof = true;
-    parser.parse_json();
+    parser.consume();
 
     // Check for any trailing garbage
     parser.consume_garbage();
     if (parser.i != in.size()) {
         err = "unexpected trailing " + esc(in[parser.i]);
         return Json();
-    }
-
-    if (parser.need_data) {
-        /* when doing full parsing, this is an error */
-        parser.failed = true;
-        parser.values.push(Json());
     }
 
 #ifndef NDEBUG
@@ -1072,11 +1144,7 @@ vector<Json> Json::parse_multi(const string &in,
     parser_stop_pos = 0;
     vector<Json> json_vec;
     while (parser.i != in.size() && !parser.failed && !parser.need_data) {
-        parser.parse_json();
-        if (parser.need_data) {
-            parser.failed = true;
-            parser.values.push(Json());
-        }
+        parser.consume();
 #ifndef NDEBUG
         if (!parser.failed)
             assert(parser.values.size() == 1);
