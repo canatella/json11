@@ -715,9 +715,139 @@ struct JsonParserPriv final {
         }
     }
 
+    /* parse_true()
+     *
+     * Parse a json true value.
+     */
+    void parse_true() {
+        expect("true", true);
+    }
+
+    /* parse_false()
+     *
+     * Parse a json false value.
+     */
+    void parse_false() {
+        expect("false", false);
+    }
+
+    /* parse_null()
+     *
+     * Parse a json null value.
+     */
+    void parse_null() {
+        expect("null", Json());
+    }
+
+    /* parse_object()
+     *
+     * Parse a json object value.
+     */
+    void parse_object() {
+        map<string, Json> data;
+        char ch = get_next_token();
+        if (ch == '}')
+            return values.push(data);
+
+        while (1) {
+            if (need_data)
+                return;
+
+            if (ch != '"')
+                return fail("expected '\"' in object, got " + esc(ch));
+
+            parse_string();
+            if (need_data)
+                return;
+
+            string key = values.top().string_value();
+            values.pop();
+
+            if (failed)
+                return values.push(Json());
+
+            ch = get_next_token();
+            if (need_data)
+                return;
+
+            if (ch != ':')
+                return fail("expected ':' in object, got " + esc(ch));
+
+            parse_json();
+            if (need_data)
+                return;
+
+            Json value = values.top();
+            values.pop();
+
+            if (failed)
+                return values.push(Json());
+
+            data[std::move(key)] = value;
+
+            ch = get_next_token();
+            if (need_data)
+                return;
+
+            if (ch == '}') {
+                values.push(data);
+                break;
+            }
+
+            if (ch != ',')
+                return fail("expected ',' in object, got " + esc(ch));
+
+            ch = get_next_token();
+        }
+    }
+
+    /* parse_array()
+     *
+     * Parse a json array value.
+     */
+    void parse_array() {
+        vector<Json> data;
+        char ch = get_next_token();
+
+        if (ch == ']')
+            return values.push(data);
+
+        while (1) {
+            if (need_data)
+                return;
+
+            i--;
+            parse_json();
+            if (need_data)
+                return;
+
+            Json value = values.top();
+            values.pop();
+
+            if (failed)
+                return values.push(Json());
+            data.push_back(value);
+
+            ch = get_next_token();
+            if (need_data)
+                return;
+
+            if (ch == ']') {
+                values.push(data);
+                break;
+            }
+
+            if (ch != ',')
+                return fail("expected ',' in list, got " + esc(ch));
+
+            ch = get_next_token();
+            (void)ch;
+        }
+    }
+
     /* parse_json()
      *
-     * Parse a JSON object.
+     * Parse any JSON value.
      */
     void parse_json() {
         if (values.size() > max_depth) {
@@ -734,115 +864,22 @@ struct JsonParserPriv final {
         }
 
         if (ch == 't')
-            return expect("true", true);
+            return parse_true();
 
         if (ch == 'f')
-            return expect("false", false);
+            return parse_false();
 
         if (ch == 'n')
-            return expect("null", Json());
+            return parse_null();
 
         if (ch == '"')
             return parse_string();
 
-        if (ch == '{') {
-            map<string, Json> data;
-            ch = get_next_token();
-            if (ch == '}')
-                return values.push(data);
+        if (ch == '{')
+            return parse_object();
 
-            while (1) {
-                if (need_data)
-                    return;
-
-                if (ch != '"')
-                    return fail("expected '\"' in object, got " + esc(ch));
-
-                parse_string();
-                if (need_data)
-                    return;
-
-                string key = values.top().string_value();
-                values.pop();
-
-                if (failed)
-                    return values.push(Json());
-
-                ch = get_next_token();
-                if (need_data)
-                    return;
-
-                if (ch != ':')
-                    return fail("expected ':' in object, got " + esc(ch));
-
-                parse_json();
-                if (need_data)
-                    return;
-
-                Json value = values.top();
-                values.pop();
-
-                if (failed)
-                    return values.push(Json());
-
-                data[std::move(key)] = value;
-
-                ch = get_next_token();
-                if (need_data)
-                    return;
-
-                if (ch == '}') {
-                    values.push(data);
-                    break;
-                }
-
-                if (ch != ',')
-                    return fail("expected ',' in object, got " + esc(ch));
-
-                ch = get_next_token();
-            }
-            return;
-        }
-
-        if (ch == '[') {
-            vector<Json> data;
-            ch = get_next_token();
-            if (ch == ']')
-                return values.push(data);
-
-            while (1) {
-                if (need_data)
-                    return;
-
-                i--;
-                parse_json();
-                if (need_data)
-                    return;
-
-                Json value = values.top();
-                values.pop();
-
-                if (failed)
-                    return values.push(Json());
-                data.push_back(value);
-
-                ch = get_next_token();
-                if (need_data)
-                    return;
-
-                if (ch == ']') {
-                    values.push(data);
-                    break;
-                }
-
-                if (ch != ',')
-                    return fail("expected ',' in list, got " + esc(ch));
-
-                ch = get_next_token();
-                (void)ch;
-            }
-            return;
-        }
+        if (ch == '[')
+            return parse_array();
 
         return fail("expected value, got " + esc(ch));
     }
