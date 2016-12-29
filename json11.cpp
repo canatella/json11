@@ -810,21 +810,23 @@ struct JsonParserPriv final {
     void parse_object() {
         assert(states.top() >= VALUE_OBJECT && states.top() <= OBJECT_VALUE);
 
-        map<string, Json> data;
+        values.push(map<string, Json>());
 
         set_state(OBJECT_KEY_OR_END);
         char ch = get_next_token();
         if (ch == '}') {
             pop_state();
-            return values.push(data);
+            return;
         }
 
         while (1) {
             if (need_data)
                 return;
 
-            if (ch != '"')
+            if (ch != '"') {
+                values.pop();
                 return fail("expected '\"' in object, got " + esc(ch));
+            }
 
             set_state(OBJECT_KEY);
             push_state(VALUE_STRING);
@@ -835,16 +837,20 @@ struct JsonParserPriv final {
             string key = values.top().string_value();
             values.pop();
 
-            if (failed)
+            if (failed) {
+                values.pop();
                 return values.push(Json());
+            }
 
             set_state(OBJECT_COLON);
             ch = get_next_token();
             if (need_data)
                 return;
 
-            if (ch != ':')
+            if (ch != ':') {
+                values.pop();
                 return fail("expected ':' in object, got " + esc(ch));
+            }
 
             set_state(OBJECT_VALUE);
             push_state(EXPECT_VALUE);
@@ -855,10 +861,14 @@ struct JsonParserPriv final {
             Json value = values.top();
             values.pop();
 
-            if (failed)
+            if (failed) {
+                values.pop();
                 return values.push(Json());
+            }
 
+            map<string, Json> data = values.top().object_items();
             data[std::move(key)] = value;
+            values.top() = data;
 
             set_state(OBJECT_COMMA_OR_END);
             ch = get_next_token();
@@ -866,14 +876,14 @@ struct JsonParserPriv final {
                 return;
 
             if (ch == '}') {
-                values.push(data);
                 pop_state();
                 break;
             }
 
-            if (ch != ',')
+            if (ch != ',') {
+                values.pop();
                 return fail("expected ',' in object, got " + esc(ch));
-
+            }
             ch = get_next_token();
         }
     }
@@ -885,14 +895,14 @@ struct JsonParserPriv final {
     void parse_array() {
         assert(states.top() >= VALUE_ARRAY && states.top() <= ARRAY_VALUE);
 
-        vector<Json> data;
+        values.push(vector<Json>());
 
         set_state(ARRAY_VALUE_OR_END);
         char ch = get_next_token();
 
         if (ch == ']') {
             pop_state();
-            return values.push(data);
+            return;
         }
 
         while (1) {
@@ -911,9 +921,14 @@ struct JsonParserPriv final {
             Json value = values.top();
             values.pop();
 
-            if (failed)
+            if (failed) {
+                values.pop();
                 return values.push(Json());
+            }
+
+            vector<Json> data = values.top().array_items();
             data.push_back(value);
+            values.top() = data;
 
             set_state(ARRAY_COMMA_OR_END);
             ch = get_next_token();
@@ -921,13 +936,14 @@ struct JsonParserPriv final {
                 return;
 
             if (ch == ']') {
-                values.push(data);
                 pop_state();
                 break;
             }
 
-            if (ch != ',')
+            if (ch != ',') {
+                values.pop();
                 return fail("expected ',' in list, got " + esc(ch));
+            }
 
             ch = get_next_token();
             (void)ch;
