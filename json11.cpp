@@ -344,8 +344,30 @@ struct JsonParserPriv final {
     const JsonParse strategy;
     std::stack<Json> values;
 
+    enum State {
+        EXPECT_VALUE,
+        VALUE_STRING,
+        VALUE_NUMBER,
+        VALUE_TRUE,
+        VALUE_FALSE,
+        VALUE_NULL,
+        VALUE_COMMENT,
+        VALUE_OBJECT,
+        OBJECT_KEY_OR_END,
+        OBJECT_COMMA_OR_END,
+        OBJECT_KEY,
+        OBJECT_COLON,
+        OBJECT_VALUE,
+        VALUE_ARRAY,
+        ARRAY_VALUE_OR_END,
+        ARRAY_COMMA_OR_END,
+        ARRAY_VALUE
+    };
+    std::stack<State> states;
+
     JsonParserPriv(string str, string &err, const JsonParse strategy):
         str(str), err(err), strategy(strategy) {
+        push_state(EXPECT_VALUE);
     }
 
     /* fail(msg, err_ret = Json())
@@ -359,6 +381,7 @@ struct JsonParserPriv final {
     template <typename T>
     void fail(string &&msg, const T err_ret) {
         if (!failed) {
+            pop_state();
             err = std::move(msg);
         }
 
@@ -367,6 +390,7 @@ struct JsonParserPriv final {
             values.push(err_ret);
 
         failed = true;
+        assert(states.size() > 0);
     }
 
     /* stop(msg, err_ret = Json())
@@ -391,6 +415,33 @@ struct JsonParserPriv final {
         return i == str.size();
     }
 
+    /* set_state()
+     *
+     * Set current parsing state.
+     */
+    void set_state(State state) {
+        states.pop();
+        states.push(state);
+    }
+
+    /* push_state()
+     *
+     * push new current parsing state.
+     */
+    void push_state(State state) {
+        states.push(state);
+    }
+
+    /* pop_state()
+     *
+     * Set current parsing state.
+     */
+    void pop_state() {
+        states.pop();
+    }
+
+#define assert_state(S) assert(states.top() == S)
+
     /* consume_whitespace()
      *
      * Advance until the current character is non-whitespace.
@@ -405,6 +456,7 @@ struct JsonParserPriv final {
      * Advance comments (c-style inline and multiline).
      */
     void consume_comment() {
+      assert_state(VALUE_COMMENT);
       bool comment_found = false;
       if (str[i] == '/') {
         i++;
@@ -446,6 +498,7 @@ struct JsonParserPriv final {
         else
           return fail("malformed comment", false);
       }
+      pop_state();
       values.push(comment_found);
     }
 
@@ -458,6 +511,7 @@ struct JsonParserPriv final {
       if(strategy == JsonParse::COMMENTS) {
         bool comment_found = false;
         do {
+          push_state(VALUE_COMMENT);
           consume_comment();
           if (need_data)
               break;
@@ -517,6 +571,8 @@ struct JsonParserPriv final {
      * Parse a string, starting at the current position.
      */
     void parse_string() {
+        assert_state(VALUE_STRING);
+
         string out;
         long last_escaped_codepoint = -1;
         while (true) {
@@ -527,6 +583,7 @@ struct JsonParserPriv final {
 
             if (ch == '"') {
                 encode_utf8(last_escaped_codepoint, out);
+                pop_state();
                 values.push(out);
                 return;
             }
@@ -611,6 +668,7 @@ struct JsonParserPriv final {
      * Parse a double.
      */
     void parse_number() {
+        assert_state(VALUE_NUMBER);
         size_t start_pos = i;
 
         if (str[i] == '-')
@@ -643,6 +701,7 @@ struct JsonParserPriv final {
 
         if (str[i] != '.' && str[i] != 'e' && str[i] != 'E'
                 && (i - start_pos) <= static_cast<size_t>(std::numeric_limits<int>::digits10)) {
+            pop_state();
             return values.push(std::atoi(str.c_str() + start_pos));
         }
 
@@ -692,6 +751,7 @@ struct JsonParserPriv final {
             }
         }
 
+        pop_state();
         return values.push(std::strtod(str.c_str() + start_pos, nullptr));
     }
 
@@ -709,6 +769,7 @@ struct JsonParserPriv final {
 
         if (str.compare(i, expected.length(), expected) == 0) {
             i += expected.length();
+            pop_state();
             return values.push(res);
         } else {
             return fail("parse error: expected " + expected + ", got " + str.substr(i, expected.length()));
@@ -720,6 +781,7 @@ struct JsonParserPriv final {
      * Parse a json true value.
      */
     void parse_true() {
+        assert_state(VALUE_TRUE);
         expect("true", true);
     }
 
@@ -728,6 +790,7 @@ struct JsonParserPriv final {
      * Parse a json false value.
      */
     void parse_false() {
+        assert_state(VALUE_FALSE);
         expect("false", false);
     }
 
@@ -736,6 +799,7 @@ struct JsonParserPriv final {
      * Parse a json null value.
      */
     void parse_null() {
+        assert_state(VALUE_NULL);
         expect("null", Json());
     }
 
@@ -744,10 +808,16 @@ struct JsonParserPriv final {
      * Parse a json object value.
      */
     void parse_object() {
+        assert(states.top() >= VALUE_OBJECT && states.top() <= OBJECT_VALUE);
+
         map<string, Json> data;
+
+        set_state(OBJECT_KEY_OR_END);
         char ch = get_next_token();
-        if (ch == '}')
+        if (ch == '}') {
+            pop_state();
             return values.push(data);
+        }
 
         while (1) {
             if (need_data)
@@ -756,6 +826,8 @@ struct JsonParserPriv final {
             if (ch != '"')
                 return fail("expected '\"' in object, got " + esc(ch));
 
+            set_state(OBJECT_KEY);
+            push_state(VALUE_STRING);
             parse_string();
             if (need_data)
                 return;
@@ -766,6 +838,7 @@ struct JsonParserPriv final {
             if (failed)
                 return values.push(Json());
 
+            set_state(OBJECT_COLON);
             ch = get_next_token();
             if (need_data)
                 return;
@@ -773,6 +846,8 @@ struct JsonParserPriv final {
             if (ch != ':')
                 return fail("expected ':' in object, got " + esc(ch));
 
+            set_state(OBJECT_VALUE);
+            push_state(EXPECT_VALUE);
             parse_json();
             if (need_data)
                 return;
@@ -785,12 +860,14 @@ struct JsonParserPriv final {
 
             data[std::move(key)] = value;
 
+            set_state(OBJECT_COMMA_OR_END);
             ch = get_next_token();
             if (need_data)
                 return;
 
             if (ch == '}') {
                 values.push(data);
+                pop_state();
                 break;
             }
 
@@ -806,17 +883,27 @@ struct JsonParserPriv final {
      * Parse a json array value.
      */
     void parse_array() {
+        assert(states.top() >= VALUE_ARRAY && states.top() <= ARRAY_VALUE);
+
         vector<Json> data;
+
+        set_state(ARRAY_VALUE_OR_END);
         char ch = get_next_token();
 
-        if (ch == ']')
+        if (ch == ']') {
+            pop_state();
             return values.push(data);
+        }
 
         while (1) {
             if (need_data)
                 return;
 
             i--;
+
+            set_state(ARRAY_VALUE);
+            push_state(EXPECT_VALUE);
+
             parse_json();
             if (need_data)
                 return;
@@ -828,12 +915,14 @@ struct JsonParserPriv final {
                 return values.push(Json());
             data.push_back(value);
 
+            set_state(ARRAY_COMMA_OR_END);
             ch = get_next_token();
             if (need_data)
                 return;
 
             if (ch == ']') {
                 values.push(data);
+                pop_state();
                 break;
             }
 
@@ -850,6 +939,8 @@ struct JsonParserPriv final {
      * Parse any JSON value.
      */
     void parse_json() {
+        assert_state(EXPECT_VALUE);
+
         if (values.size() > max_depth) {
             return fail("exceeded maximum nesting depth");
         }
@@ -860,26 +951,39 @@ struct JsonParserPriv final {
 
         if (ch == '-' || (ch >= '0' && ch <= '9')) {
             i--;
+            set_state(VALUE_NUMBER);
             return parse_number();
         }
 
-        if (ch == 't')
+        if (ch == 't') {
+            set_state(VALUE_TRUE);
             return parse_true();
+        }
 
-        if (ch == 'f')
+        if (ch == 'f') {
+            set_state(VALUE_FALSE);
             return parse_false();
+        }
 
-        if (ch == 'n')
+        if (ch == 'n') {
+            set_state(VALUE_NULL);
             return parse_null();
+        }
 
-        if (ch == '"')
+        if (ch == '"') {
+            set_state(VALUE_STRING);
             return parse_string();
+        }
 
-        if (ch == '{')
+        if (ch == '{') {
+            set_state(VALUE_OBJECT);
             return parse_object();
+        }
 
-        if (ch == '[')
+        if (ch == '[') {
+            set_state(VALUE_ARRAY);
             return parse_array();
+        }
 
         return fail("expected value, got " + esc(ch));
     }
@@ -908,13 +1012,15 @@ Json JsonParser::json() {
 
 Json Json::parse(const string &in, string &err, JsonParse strategy) {
     JsonParserPriv parser { in, err, strategy };
+    assert(parser.states.size() == 1);
+
     parser.eof = true;
     parser.parse_json();
 
     // Check for any trailing garbage
     parser.consume_garbage();
     if (parser.i != in.size()) {
-        parser.fail("unexpected trailing " + esc(in[parser.i]));
+        err = "unexpected trailing " + esc(in[parser.i]);
         return Json();
     }
 
@@ -925,8 +1031,10 @@ Json Json::parse(const string &in, string &err, JsonParse strategy) {
     }
 
 #ifndef NDEBUG
-    if (!parser.failed)
+    if (!parser.failed) {
         assert(parser.values.size() == 1);
+        assert(parser.states.empty());
+    }
 #endif
     return parser.values.top();
 }
@@ -954,8 +1062,11 @@ vector<Json> Json::parse_multi(const string &in,
         parser.values.pop();
         // Check for another object
         parser.consume_garbage();
-        if (!parser.failed && !parser.need_data)
+        if (!parser.failed && !parser.need_data) {
+            assert(parser.states.empty());
+            parser.push_state(JsonParserPriv::EXPECT_VALUE);
             parser_stop_pos = parser.i;
+        }
     }
     return json_vec;
 }
