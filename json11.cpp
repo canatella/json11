@@ -343,6 +343,7 @@ struct JsonParserPriv final {
     bool eof = false;
     const JsonParse strategy;
     std::stack<Json> values;
+    size_t last_position;
 
     enum State {
         EXPECT_VALUE,
@@ -404,6 +405,9 @@ struct JsonParserPriv final {
             values.push(Json());
             failed = true;
         }
+        else
+            i = last_position;
+
         need_data = true;
     }
 
@@ -420,6 +424,7 @@ struct JsonParserPriv final {
      * Set current parsing state.
      */
     void set_state(State state) {
+        last_position = i;
         states.pop();
         states.push(state);
     }
@@ -429,6 +434,7 @@ struct JsonParserPriv final {
      * push new current parsing state.
      */
     void push_state(State state) {
+        last_position = i;
         states.push(state);
     }
 
@@ -437,6 +443,7 @@ struct JsonParserPriv final {
      * Set current parsing state.
      */
     void pop_state() {
+        last_position = i;
         states.pop();
     }
 
