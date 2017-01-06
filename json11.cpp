@@ -1112,6 +1112,10 @@ Json JsonParser::json() {
     return parser->values.top();
 }
 
+void JsonParser::reset() {
+    parser.reset(new JsonParserPriv("", error, parser->strategy));
+}
+
 Json Json::parse(const string &in, string &err, JsonParse strategy) {
     JsonParserPriv parser { in, err, strategy };
     assert(parser.states.size() == 1);

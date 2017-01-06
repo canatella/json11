@@ -239,6 +239,8 @@ public:
 
     Json json();
     void consume(const std::string &in);
+    void reset();
+
 
     const std::string &last_error() const {
         return error;
