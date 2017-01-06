@@ -39,4 +39,27 @@ JSON values can have their values queried and inspected:
     Json json = Json::array { Json::object { { "k", "v" } } };
     std::string str = json[0]["k"].string_value();
 
+## Parsing
+
+To parse a string, you can simply call
+
+    Json json = Json::parse("{ \"key\": \"value1\" }");
+
+If you need to parse json data in multiple step, because you are
+using non-blocking io for example, you can create a parser object. It will hold
+the parsing state and you can give it the data as it comes along:
+
+    JsonParser parser;
+    std::string data = read_data();
+    while (!data.empty()) {
+        parse.consume(data);
+    }
+
+    if (!parser.last_error().empty()) {
+        /* an error occured */
+        ...
+    }
+
+    Json json = parser.json();
+
 More documentation is still to come. For now, see json11.hpp.
