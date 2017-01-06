@@ -250,6 +250,23 @@ JSON11_TEST_CASE(json11_test) {
     std::vector<Point> points = { { 1, 2 }, { 10, 20 }, { 100, 200 } };
     std::string points_json = Json(points).dump();
     printf("%s\n", points_json.c_str());
+
+    /* Test chunk parsing */
+    JsonParser parser = { JsonParse::COMMENTS };
+    for (auto c: simple_test) {
+        parser.consume(std::string(1, c));
+    }
+    my_json = parser.json();
+    JSON11_TEST_ASSERT(my_json == json);
+
+    parser.reset();
+    for (auto c: comment_test) {
+        parser.consume(std::string(1, c));
+    }
+
+    my_json = parser.json();
+    JSON11_TEST_ASSERT(parser.last_error().empty());
+    JSON11_TEST_ASSERT(my_json == json_comment);
 }
 
 #if JSON11_TEST_STANDALONE_MAIN
